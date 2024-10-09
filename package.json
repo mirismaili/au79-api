@@ -1,6 +1,7 @@
 {
   "name": "au79-api",
   "version": "0.1.0",
+  "type": "module",
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "version:patch": "npm version patch --no-git-tag-version",
@@ -15,6 +16,5 @@
   },
   "devDependencies": {
     "bun-types": "^1.1.30"
-  },
-  "module": "src/index.js"
+  }
 }
