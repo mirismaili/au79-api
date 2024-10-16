@@ -1,0 +1,1 @@
+node --import tsx .husky/post-commit.ts &>.husky/.post-commit.log & # https://superuser.com/a/178592/680152

@@ -6,6 +6,7 @@
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/utils" isTestSource="false" />
       <excludePattern pattern="package-lock.json" />
+      <excludePattern pattern=".post-commit.log" />
     </content>
     <orderEntry type="sourceFolder" forTests="false" />
   </component>

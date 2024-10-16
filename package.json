@@ -4,17 +4,41 @@
   "type": "module",
   "scripts": {
     "dev": "bun run --watch src/index.ts",
+    "prettier:check": "prettier --check .",
+    "prettier:format": "prettier --write .",
+    "prettier:check.non-eslint-included-files": "prettier --check . !**/*.{ts,tsx,js,jsx,cjs,mjs}",
+    "prettier:format.non-eslint-included-files": "prettier --write . !**/*.{ts,tsx,js,jsx,cjs,mjs}",
+    "lint": "DEBUG=eslint:eslint eslint --report-unused-disable-directives --max-warnings=0 .",
+    "lint:fix": "DEBUG=eslint:eslint eslint --report-unused-disable-directives --max-warnings=0 --fix .",
     "version:patch": "npm version patch --no-git-tag-version",
     "version:minor": "npm version minor --no-git-tag-version",
     "version:major": "npm version major --no-git-tag-version",
     "version:tag": "node -e \"child_process.execSync('git tag v' + require('./package.json').version)\"",
     "sort-dependencies": "node -e \"if(process.env.CI)process.exit();P=fs.readFileSync('package.json','utf8');({dependencies:d,devDependencies:D}=p=JSON.parse(P));[k,K]=[d??{},D??{}].map(Object.keys);[s,S]=[k,K].map(x=>x.toSorted());if(s.every((x,i)=>x===k[i])&&S.every((x,i)=>x===K[i]))process.exit();p.dependencies=d&&Object.fromEntries(s.map(k=>[k,d[k]]));p.devDependencies=D&&Object.fromEntries(S.map(K=>[K,D[K]]));fs.writeFileSync('package.json',JSON.stringify(p,null,P.match(/(?<=^\\{\\n?)[ \\t]+/)[0])+'\\n');console.log('\\x1b[32mDependencies have been sorted.\\x1b[0m👏')\"",
-    "postinstall": "npm run sort-dependencies"
+    "postinstall": "npm run sort-dependencies",
+    "post-commit-log": "tail -fn100 .husky/.post-commit.log",
+    "prepare": "husky"
   },
   "dependencies": {
     "elysia": "^1.1.22"
   },
   "devDependencies": {
-    "bun-types": "^1.1.30"
+    "@eslint/js": "^9.12.0",
+    "@types/eslint": "^9.6.1",
+    "@types/node-notifier": "^8.0.5",
+    "anstyle": "2.1.3",
+    "bun-types": "^1.1.30",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-prettier": "^5.2.1",
+    "globals": "^15.11.0",
+    "husky": "^9.1.6",
+    "node-notifier": "^10.0.1",
+    "prettier": "~3.3.3",
+    "prettier-plugin-organize-imports": "~4.1.0",
+    "prettier-plugin-tailwindcss": "~0.6.8",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.9.0"
   }
 }
