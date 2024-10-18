@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "bun run --watch src/index.ts",
+    "build": "rm -rf dist && NODE_ENV=production bun build src/index.ts --minify --sourcemap=external --target=bun --outdir=dist",
+    "start": "NODE_ENV=production bun dist/index.js",
     "prettier:check": "prettier --check .",
     "prettier:format": "prettier --write .",
     "prettier:check.non-eslint-included-files": "prettier --check . !**/*.{ts,tsx,js,jsx,cjs,mjs}",
