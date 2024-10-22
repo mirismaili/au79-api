@@ -1,0 +1,13 @@
+services:
+  api:
+    image: au79-api-img
+    build:
+      context: .
+      args:
+        BUN_VERSION: 1.1.32
+        NODE_VERSION: 23.0.0
+        CI: true # Simulate production build
+    environment:
+      PORT: 7979
+    ports:
+      - 7979:7979
