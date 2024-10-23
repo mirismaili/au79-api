@@ -26,3 +26,6 @@ dist/
 
 ### Misc. ###
 .post-commit.log
+
+### DB ###
+/postgresql/

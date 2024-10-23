@@ -14,6 +14,7 @@ const parserOptions = {
 
 /** @type {import('eslint').Linter.FlatConfig[]} */
 const config = [
+  {ignores: ['/postgresql/']},
   {
     rules: {
       ...Object.fromEntries(
