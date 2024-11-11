@@ -24,9 +24,9 @@ const createUser = t.Intersect([
 const credentials: {id: string; transports?: AuthenticatorTransportFuture[]}[] = []
 
 const app = new Elysia()
+  .use(cors({origin: 'http://localhost:7900', methods: ['GET', 'POST'], credentials: true}))
   .group('/auth', (app) =>
     app
-      .use(cors({origin: 'http://localhost:7900', methods: ['GET', 'POST'], credentials: true}))
       .get(
         '/register',
         async ({cookie: {session}}) => {
