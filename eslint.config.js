@@ -37,6 +37,7 @@ const config = [
       'prefer-promise-reject-errors': ['error', {allowEmptyReject: true}],
       'arrow-body-style': ['warn', 'as-needed'],
       'prefer-arrow-callback': ['error', {allowNamedFunctions: true}],
+      'no-useless-rename': 'warn',
     },
   },
   {
@@ -59,7 +60,6 @@ const config = [
   },
   ...mapAllErrorsToWarn(tsEslint.configs.strictTypeChecked),
   ...mapAllErrorsToWarn(tsEslint.configs.stylisticTypeChecked),
-  // Overrides:
   {
     rules: {
       '@typescript-eslint/no-unsafe-assignment': 'off', // These rules ...
@@ -71,6 +71,7 @@ const config = [
     files: ['**/*.t{s,sx}'],
     rules: {
       // Overrides:
+      '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/use-unknown-in-catch-callback-variable': 'off',
       '@typescript-eslint/restrict-template-expressions': ['warn', {allowNumber: true}],
       '@typescript-eslint/no-unused-vars': [
