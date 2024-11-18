@@ -2,7 +2,7 @@ import * as drizzleSchema from '@/db/schema'
 import {cors} from '@elysiajs/cors'
 import {swagger} from '@elysiajs/swagger'
 import {generateRegistrationOptions, verifyRegistrationResponse} from '@simplewebauthn/server'
-import type {AuthenticatorTransportFuture, Base64URLString, WebAuthnCredential} from '@simplewebauthn/types'
+import type {AuthenticatorTransportFuture, Base64URLString} from '@simplewebauthn/types'
 import {eq} from 'drizzle-orm'
 import {drizzle} from 'drizzle-orm/node-postgres'
 import {createInsertSchema} from 'drizzle-typebox'
@@ -20,7 +20,6 @@ const tSession = t.Object({
   challenge: t.String(),
   username: t.String(),
   webauthnUserId: t.String(),
-  userId: t.Optional(t.String()),
 })
 
 /** @see https://github.com/sinclairzx81/typebox#unsafe-types */
@@ -88,7 +87,7 @@ const app = new Elysia()
           return options
         },
         {
-          query: t.Object({username: usernameSchema}),
+          query: t.Object({username: {...t.Index(insertUserSchema, ['username']), minLength: 5}}),
           cookie: t.Cookie(
             {
               session: t.Optional(t.Partial(tSession)),
@@ -103,9 +102,8 @@ const app = new Elysia()
       .post(
         '/register',
         async ({body, cookie: {session}, error}) => {
-          console.log('body', body)
           const sessionValue = session.value
-          session.remove()
+          session.set({sameSite: 'none', secure: true, httpOnly: true, partitioned: true, expires: new Date(0)}) // Remove session
           const expectedChallenge = sessionValue.challenge
 
           const {verification, err} = await verifyRegistrationResponse({
@@ -117,7 +115,6 @@ const app = new Elysia()
           })
             .then((verification) => ({verification, err: undefined}))
             .catch((e) => ({verification: undefined, err: e as Error}))
-          console.log('verification', verification)
           if (err) {
             console.error(err)
             return error(400, err.message)
@@ -127,7 +124,6 @@ const app = new Elysia()
 
           if (!verified) return error(401, 'Verification failed. Try again.')
 
-          console.log('sessionValue', sessionValue)
           if (registrationInfo) {
             let [user] = await db
               .insert(usersTable)
@@ -183,6 +179,39 @@ const app = new Elysia()
       ),
   )
   .listen(Bun.env.PORT ?? 7979)
+
+// const app = new Elysia()
+//   //   {
+//   //   cookie: {
+//   //     secrets: 'Fischl von Luftschloss Narfidort',
+//   //     sign: ['profile'],
+//   //   },
+//   // }
+//   .get(
+//     '/',
+//     ({cookie: {profile}}) => {
+//       profile.value = {
+//         id: 617,
+//         name: 'Summoning 101',
+//       }
+//       return 'A'
+//     },
+//     {
+//       cookie: t.Cookie(
+//         {
+//           profile: t.Object({
+//             id: t.Numeric(),
+//             name: t.String(),
+//           }),
+//         },
+//         {
+//           secrets: 'Fischl von Luftschloss Narfidort',
+//           sign: ['profile'],
+//         },
+//       ),
+//     },
+//   )
+//   .listen(Bun.env.PORT ?? 7979)
 
 console.info(`🦊 Elysia is running at ${app.server!.url}`)
 

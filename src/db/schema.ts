@@ -40,9 +40,7 @@ export const usersTable = pgTable('user', {
 export const passkeysTable = pgTable(
   'passkey',
   {
-    id: text()
-      .$defaultFn(() => createId())
-      .primaryKey(),
+    id: text().primaryKey(),
     publicKey: bytea('public_key').notNull(),
     userId: char('user_id', {length: 24}).references(() => usersTable.id),
     webauthnUserId: text('webauthn_user_id').notNull(), // A UNIQUE constraint on `webAuthnUserId + userId` also achieves maximum user privacy
