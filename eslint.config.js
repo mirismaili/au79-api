@@ -14,7 +14,7 @@ const parserOptions = {
 
 /** @type {import('eslint').Linter.FlatConfig[]} */
 const config = [
-  {ignores: ['/postgresql/']},
+  {ignores: ['/postgresql/', '/redis/']},
   {
     rules: {
       ...Object.fromEntries(
@@ -73,6 +73,7 @@ const config = [
       // Overrides:
       '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/use-unknown-in-catch-callback-variable': 'off',
+      '@typescript-eslint/consistent-type-definitions': ['warn', 'type'],
       '@typescript-eslint/restrict-template-expressions': ['warn', {allowNumber: true}],
       '@typescript-eslint/no-unused-vars': [
         'warn',
