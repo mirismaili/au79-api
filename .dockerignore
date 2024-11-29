@@ -15,6 +15,7 @@
 **/README.md
 
 /postgresql/
+/drizzle/
 /redis/
 
 **/node_modules/

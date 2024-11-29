@@ -1,6 +1,7 @@
 import * as drizzleSchema from '@/db/schema'
 import {cors} from '@elysiajs/cors'
 import {swagger} from '@elysiajs/swagger'
+import {init as initCuid} from '@paralleldrive/cuid2'
 import {generateRegistrationOptions, verifyRegistrationResponse} from '@simplewebauthn/server'
 import type {AuthenticatorTransportFuture, Base64URLString} from '@simplewebauthn/types'
 import {eq} from 'drizzle-orm'
@@ -8,6 +9,8 @@ import {drizzle} from 'drizzle-orm/node-postgres'
 import {Elysia, t} from 'elysia'
 import {createClient} from 'redis'
 import {EntityId, Repository, Schema} from 'redis-om'
+
+const createId = initCuid({length: 24})
 
 type RegistrationSession = {challenge: string; userId: string; webauthnUserId: string}
 
@@ -82,18 +85,22 @@ const app = new Elysia()
             httpOnly: true,
             partitioned: true,
           })
-          const sessionId = await registrationSessionRepository
-            .save({
+          const sessionId = createId()
+
+          registrationSessionRepository
+            .save(sessionId, {
               challenge: options.challenge,
               userId: user.id,
               webauthnUserId: options.user.id,
             })
-            .then(
-              (registrationSession) => (registrationSession as RegistrationSession & {[EntityId]: string})[EntityId],
-            )
-          registrationSessionRepository.expire(sessionId, REGISTRATION_TIMEOUT + 60).catch(console.error)
-          session.value = sessionId
+            .then(async (registrationSession) => {
+              const entityId = (registrationSession as RegistrationSession & {[EntityId]: string})[EntityId]
+              console.assert(entityId === sessionId)
+              await registrationSessionRepository.expire(entityId, REGISTRATION_TIMEOUT + 60)
+            })
+            .catch(console.error)
 
+          session.value = sessionId
           return options
         },
         {
