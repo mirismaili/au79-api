@@ -1,5 +1,5 @@
 {
-  "id": "2b9180f2-e3ff-4a73-8588-26c846c645b4",
+  "id": "b7ac0383-3765-4343-844c-b0d4fda85225",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -54,7 +54,8 @@
           "name": "transports",
           "type": "varchar(255)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": "''"
         }
       },
       "indexes": {

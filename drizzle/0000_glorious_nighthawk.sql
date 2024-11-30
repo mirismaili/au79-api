@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS "passkey" (
 	"counter" bigint NOT NULL,
 	"device_type" varchar(32) NOT NULL,
 	"backed_up" boolean NOT NULL,
-	"transports" varchar(255)
+	"transports" varchar(255) DEFAULT '' NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "user" (
