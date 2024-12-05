@@ -6,6 +6,7 @@ declare namespace NodeJS {
     readonly REDIS_URL: string
     readonly DATABASE_URL: string
     readonly PEPPER: string
+    readonly JWT_SECRET: string
     readonly PORT?: string
   }
 }

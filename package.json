@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@elysiajs/cors": "^1.1.1",
+    "@elysiajs/jwt": "^1.1.1",
     "@elysiajs/swagger": "^1.1.5",
     "@paralleldrive/cuid2": "^2.2.2",
     "@simplewebauthn/server": "^11.0.0",

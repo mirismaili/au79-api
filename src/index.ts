@@ -1,5 +1,6 @@
 import * as drizzleSchema from '@/db/schema'
 import {cors} from '@elysiajs/cors'
+import {jwt} from '@elysiajs/jwt'
 import {swagger} from '@elysiajs/swagger'
 import {init as initCuid} from '@paralleldrive/cuid2'
 import {
@@ -11,6 +12,7 @@ import {
 import type {Base64URLString} from '@simplewebauthn/types'
 import {eq} from 'drizzle-orm'
 import {drizzle} from 'drizzle-orm/node-postgres'
+import type {Cookie} from 'elysia'
 import {Elysia, t} from 'elysia'
 import {createClient} from 'redis'
 import {EntityId, Repository, Schema} from 'redis-om'
@@ -23,7 +25,7 @@ await redisClient.connect()
 
 type RegistrationSession = {challenge: string; userId: string; webauthnUserId: string}
 const registrationSessionRepository = new Repository(
-  new Schema<RegistrationSession>('registrationSession', {
+  new Schema<RegistrationSession>('session', {
     challenge: {type: 'string'},
     userId: {type: 'string'},
     webauthnUserId: {type: 'string'},
@@ -33,7 +35,7 @@ const registrationSessionRepository = new Repository(
 
 type AuthenticationSession = {challenge: string; userId: string}
 const authenticationSessionRepository = new Repository(
-  new Schema<AuthenticationSession>('authenticationSession', {
+  new Schema<AuthenticationSession>('session', {
     challenge: {type: 'string'},
     userId: {type: 'string'},
   }),
@@ -50,114 +52,127 @@ const tBase64URLString = t.Unsafe<Base64URLString>(t.String({contentEncoding: 'b
 
 const AUTHENTICATION_TIMEOUT = 60
 
-const app = new Elysia()
-  .use(swagger({path: 'open-api'}))
+const authApp = new Elysia({prefix: '/auth'})
   .use(cors({origin: process.env.CORS_ORIGIN, methods: ['GET', 'POST'], credentials: true}))
-  .group('/auth', (app) =>
-    app
-      .get(
-        '/register',
-        async ({query: {username, phone, email}, cookie: {session}}) => {
-          const [newUser] = await db
-            .insert(usersTable)
-            .values({username, phone: phone ? +phone : undefined, email})
-            .onConflictDoNothing()
-            .returning()
+  .use(jwt({name: 'jwt', secret: process.env.JWT_SECRET}))
+  .guard(
+    {
+      async beforeHandle({cookie: {auth}, error, jwt}) {
+        if (auth!.value) {
+          const profile = await jwt.verify(auth!.value)
+          if (profile) return error('Conflict', 'User already logged in.')
+          removeSecureCookie(auth!)
+        }
+      },
+    },
+    (app) =>
+      app
+        .get(
+          '/register',
+          async ({query: {username, phone, email}, cookie: {session}}) => {
+            const [newUser] = await db
+              .insert(usersTable)
+              .values({username, phone: phone ? +phone : undefined, email})
+              .onConflictDoNothing()
+              .returning()
 
-          const user = newUser
-            ? {...newUser, passkeys: []}
-            : (await db.query.usersTable.findFirst({where: eq(usersTable.username, username), with: {passkeys: true}}))!
+            const user = newUser
+              ? {...newUser, passkeys: []}
+              : (await db.query.usersTable.findFirst({
+                  where: eq(usersTable.username, username),
+                  with: {passkeys: true},
+                }))!
 
-          const options = await generateRegistrationOptions({
-            rpName: 'Au79 API',
-            rpID: process.env.RPID,
-            userName: username,
-            timeout: AUTHENTICATION_TIMEOUT * 1000,
-            attestationType: 'none',
-            /**
-             * Passing in a user's list of already-registered credential IDs here prevents users from
-             * registering the same authenticator multiple times. The authenticator will simply throw an
-             * error in the browser if it's asked to perform registration when it recognizes one of the
-             * credential ID's.
-             */
-            excludeCredentials: user.passkeys.map((passkey) => ({
-              id: passkey.id,
-              transports: passkey.transports,
-            })),
-            authenticatorSelection: {
-              residentKey: 'discouraged',
-              // Wondering why user verification isn't required? See: https://passkeys.dev/docs/use-cases/bootstrapping/#a-note-about-user-verification
-              userVerification: 'preferred',
-            },
-            // Support the two most common algorithms: ES256, and RS256. See: https://chromium.googlesource.com/chromium/src/+/main/content/browser/webauth/pub_key_cred_params.md
-            supportedAlgorithmIDs: [ES256, RS256],
-          })
-
-          const sessionId = createId()
-
-          registrationSessionRepository
-            .save(sessionId, {
-              challenge: options.challenge,
-              userId: user.id,
-              webauthnUserId: options.user.id,
+            const options = await generateRegistrationOptions({
+              rpName: 'Au79 API',
+              rpID: process.env.RPID,
+              userName: username,
+              timeout: AUTHENTICATION_TIMEOUT * 1000,
+              attestationType: 'none',
+              /**
+               * Passing in a user's list of already-registered credential IDs here prevents users from
+               * registering the same authenticator multiple times. The authenticator will simply throw an
+               * error in the browser if it's asked to perform registration when it recognizes one of the
+               * credential ID's.
+               */
+              excludeCredentials: user.passkeys.map((passkey) => ({
+                id: passkey.id,
+                transports: passkey.transports,
+              })),
+              authenticatorSelection: {
+                residentKey: 'discouraged',
+                // Wondering why user verification isn't required? See: https://passkeys.dev/docs/use-cases/bootstrapping/#a-note-about-user-verification
+                userVerification: 'preferred',
+              },
+              // Support the two most common algorithms: ES256, and RS256. See: https://chromium.googlesource.com/chromium/src/+/main/content/browser/webauth/pub_key_cred_params.md
+              supportedAlgorithmIDs: [ES256, RS256],
             })
-            .then(async (registrationSession) => {
-              const entityId = (registrationSession as RegistrationSession & {[EntityId]: string})[EntityId]
-              console.assert(entityId === sessionId)
-              await registrationSessionRepository.expire(entityId, AUTHENTICATION_TIMEOUT + 60)
+
+            const sessionId = createId()
+
+            registrationSessionRepository
+              .save(sessionId, {
+                challenge: options.challenge,
+                userId: user.id,
+                webauthnUserId: options.user.id,
+              })
+              .then(async (session) => {
+                const entityId = (session as RegistrationSession & {[EntityId]: string})[EntityId]
+                console.assert(entityId === sessionId)
+                await registrationSessionRepository.expire(entityId, AUTHENTICATION_TIMEOUT + 60)
+              })
+              .catch(console.error)
+
+            session.set({
+              sameSite: 'none',
+              secure: true,
+              httpOnly: true,
+              partitioned: true,
             })
-            .catch(console.error)
+            session.value = sessionId
+            return options
+          },
+          {
+            query: t.Object({
+              username: t.String({minLength: 0}),
+              phone: t.Optional(t.String({minLength: 6, pattern: '^\\d*$'})),
+              email: t.Optional(t.String({format: 'email'})),
+            }),
+            cookie: t.Cookie({session: t.Optional(t.String()), auth: t.Optional(t.String())}),
+          },
+        )
+        .post(
+          '/register',
+          async ({body, cookie: {session, auth}, jwt, error}) => {
+            const {
+              challenge: expectedChallenge,
+              userId,
+              webauthnUserId,
+            } = await registrationSessionRepository.fetch(session.value)
 
-          session.set({
-            sameSite: 'none',
-            secure: true,
-            httpOnly: true,
-            partitioned: true,
-          })
-          session.value = sessionId
-          return options
-        },
-        {
-          query: t.Object({
-            username: t.String({minLength: 0}),
-            phone: t.Optional(t.String({minLength: 6, pattern: '^\\d*$'})),
-            email: t.Optional(t.String({format: 'email'})),
-          }),
-          cookie: t.Cookie({session: t.Optional(t.String())}),
-        },
-      )
-      .post(
-        '/register',
-        async ({body, cookie: {session}, error}) => {
-          const {
-            challenge: expectedChallenge,
-            userId,
-            webauthnUserId,
-          } = await registrationSessionRepository.fetch(session.value)
+            removeSecureCookie(session)
 
-          session.set({sameSite: 'none', secure: true, httpOnly: true, partitioned: true, expires: new Date(0)}) // Remove session
+            if (!expectedChallenge) return error('Unauthorized', 'Session not found. It maybe expired.') // https://stackoverflow.com/questions/1653493/what-http-status-code-is-supposed-to-be-used-to-tell-the-client-the-session-has
 
-          if (!expectedChallenge) return error('Unauthorized', 'Session not found. It maybe expired.') // https://stackoverflow.com/questions/1653493/what-http-status-code-is-supposed-to-be-used-to-tell-the-client-the-session-has
+            const {verification, err} = await verifyRegistrationResponse({
+              response: body,
+              expectedChallenge,
+              expectedOrigin: process.env.CORS_ORIGIN,
+              expectedRPID: process.env.RPID,
+              requireUserVerification: false, // TODO
+            })
+              .then((verification) => ({verification, err: undefined}))
+              .catch((err: Error) => ({verification: undefined, err}))
+            if (err) {
+              console.error(err)
+              return error('Bad Request', err.message)
+            }
 
-          const {verification, err} = await verifyRegistrationResponse({
-            response: body,
-            expectedChallenge,
-            expectedOrigin: process.env.CORS_ORIGIN,
-            expectedRPID: process.env.RPID,
-            requireUserVerification: false, // TODO
-          })
-            .then((verification) => ({verification, err: undefined}))
-            .catch((e) => ({verification: undefined, err: e as Error}))
-          if (err) {
-            console.error(err)
-            return error('Bad Request', err.message)
-          }
+            const {verified, registrationInfo} = verification
 
-          const {verified, registrationInfo} = verification
+            if (!verified) return error('Unauthorized', 'Verification failed. Try again.')
+            if (!registrationInfo) return error('Internal Server Error', "Couldn't resolve `registrationInfo`.")
 
-          if (!verified) return error('Unauthorized', 'Verification failed. Try again.')
-
-          if (registrationInfo) {
             const user = (await db.query.usersTable.findFirst({
               where: eq(usersTable.id, userId),
               with: {passkeys: true},
@@ -165,168 +180,195 @@ const app = new Elysia()
 
             const {credential, credentialBackedUp, credentialDeviceType} = registrationInfo
 
-            await db
-              .insert(passkeysTable)
-              .values({
-                ...credential,
-                transports: body.response.transports,
-                userId: user.id,
-                webauthnUserId,
-                backedUp: credentialBackedUp,
-                deviceType: credentialDeviceType,
-              })
-              .onConflictDoNothing()
-          }
-
-          return 'Verified' as const
-        },
-        {
-          body: t.Object({
-            id: tBase64URLString,
-            rawId: tBase64URLString,
-            response: t.Object({
-              clientDataJSON: tBase64URLString,
-              attestationObject: tBase64URLString,
-              authenticatorData: t.Optional(tBase64URLString),
-              transports: t.Optional(
-                t.Array(tStringEnum(['ble', 'cable', 'hybrid', 'internal', 'nfc', 'smart-card', 'usb'] as const)),
-              ),
-              publicKeyAlgorithm: t.Optional(t.Number()),
-              publicKey: t.Optional(tBase64URLString),
-            }),
-            authenticatorAttachment: tStringEnum(['cross-platform', 'platform'] as const),
-            clientExtensionResults: t.Object({
-              appid: t.Optional(t.Boolean()),
-              credProps: t.Optional(t.Object({rk: t.Optional(t.Boolean())})),
-              hmacCreateSecret: t.Optional(t.Boolean()),
-            }),
-            type: t.Literal<PublicKeyCredentialType>('public-key'),
-          }),
-          cookie: t.Cookie({session: t.String()}),
-        },
-      )
-      .get(
-        '/authenticate',
-        async ({query: {username}, cookie: {session}, error}) => {
-          const user = await db.query.usersTable.findFirst({
-            where: eq(usersTable.username, username),
-            with: {passkeys: true},
-          })
-
-          if (!user?.passkeys.length) return error('Not Found', 'User not found')
-
-          const options = await generateAuthenticationOptions({
-            timeout: AUTHENTICATION_TIMEOUT,
-            allowCredentials: user.passkeys.map((passkey) => ({
-              id: passkey.id,
-              type: 'public-key',
-              transports: passkey.transports,
-            })),
-            // Wondering why user verification isn't required? See: https://passkeys.dev/docs/use-cases/bootstrapping/#a-note-about-user-verification
-            userVerification: 'preferred',
-            rpID: process.env.RPID,
-          })
-
-          const sessionId = createId()
-
-          authenticationSessionRepository
-            .save(sessionId, {
-              challenge: options.challenge,
+            await db.insert(passkeysTable).values({
+              ...credential,
+              transports: body.response.transports,
               userId: user.id,
+              webauthnUserId,
+              backedUp: credentialBackedUp,
+              deviceType: credentialDeviceType,
             })
-            .then(async (registrationSession) => {
-              const entityId = (registrationSession as RegistrationSession & {[EntityId]: string})[EntityId]
-              console.assert(entityId === sessionId)
-              await authenticationSessionRepository.expire(entityId, AUTHENTICATION_TIMEOUT + 60)
+
+            auth.set({
+              value: await jwt.sign({id: user.id, username: user.username}),
+              sameSite: 'none',
+              httpOnly: true,
+              secure: true,
+              partitioned: true,
+              maxAge: SESSION_MAX_AGE, // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie#max-agenumber
+              // path: '/dashboard',
             })
-            .catch(console.error)
-
-          session.set({
-            sameSite: 'none',
-            secure: true,
-            httpOnly: true,
-            partitioned: true,
-          })
-          session.value = sessionId
-          return options
-        },
-        {
-          query: t.Object({
-            username: t.String({minLength: 0}),
-          }),
-          cookie: t.Cookie({session: t.Optional(t.String())}),
-        },
-      )
-      .post(
-        '/authenticate',
-        async ({body, cookie: {session}, error}) => {
-          const {challenge: expectedChallenge, userId} = await authenticationSessionRepository.fetch(session.value)
-
-          session.set({sameSite: 'none', secure: true, httpOnly: true, partitioned: true, expires: new Date(0)}) // Remove session
-
-          if (!expectedChallenge) return error('Unauthorized', 'Session not found. It maybe expired.') // https://stackoverflow.com/questions/1653493/what-http-status-code-is-supposed-to-be-used-to-tell-the-client-the-session-has
-
-          const user = (await db.query.usersTable.findFirst({
-            where: eq(usersTable.id, userId),
-            with: {passkeys: true},
-          }))!
-
-          const dbCredential = user.passkeys.find(({id}) => id === body.id)
-
-          if (!dbCredential) return error('Bad Request', 'Authenticator is not registered with this site')
-
-          const {verification, err} = await verifyAuthenticationResponse({
-            response: body,
-            expectedChallenge,
-            expectedOrigin: process.env.CORS_ORIGIN,
-            expectedRPID: process.env.RPID,
-            credential: {
-              ...dbCredential,
-              transports: dbCredential.transports,
-            },
-            requireUserVerification: false,
-          })
-            .then((verification) => ({verification, err: undefined}))
-            .catch((e) => ({verification: undefined, err: e as Error}))
-          if (err) {
-            console.error(err)
-            return error('Bad Request', err.message)
-          }
-
-          const {verified, authenticationInfo} = verification
-
-          if (!verified) return error('Unauthorized', 'Verification failed. Try again.')
-
-          // Update the credential's counter in the DB to the newest count in the authentication
-          db.update(passkeysTable).set({counter: authenticationInfo.newCounter}).catch(console.error)
-
-          return 'Verified' as const
-        },
-        {
-          body: t.Object({
-            id: tBase64URLString,
-            rawId: tBase64URLString,
-            response: t.Object({
-              clientDataJSON: tBase64URLString,
-              authenticatorData: tBase64URLString,
-              signature: tBase64URLString,
-              userHandle: t.Optional(tBase64URLString),
+          },
+          {
+            body: t.Object({
+              id: tBase64URLString,
+              rawId: tBase64URLString,
+              response: t.Object({
+                clientDataJSON: tBase64URLString,
+                attestationObject: tBase64URLString,
+                authenticatorData: t.Optional(tBase64URLString),
+                transports: t.Optional(
+                  t.Array(tStringEnum(['ble', 'cable', 'hybrid', 'internal', 'nfc', 'smart-card', 'usb'] as const)),
+                ),
+                publicKeyAlgorithm: t.Optional(t.Number()),
+                publicKey: t.Optional(tBase64URLString),
+              }),
+              authenticatorAttachment: tStringEnum(['cross-platform', 'platform'] as const),
+              clientExtensionResults: t.Object({
+                appid: t.Optional(t.Boolean()),
+                credProps: t.Optional(t.Object({rk: t.Optional(t.Boolean())})),
+                hmacCreateSecret: t.Optional(t.Boolean()),
+              }),
+              type: t.Literal<PublicKeyCredentialType>('public-key'),
             }),
-            authenticatorAttachment: tStringEnum(['cross-platform', 'platform'] as const),
-            clientExtensionResults: t.Object({
-              appid: t.Optional(t.Boolean()),
-              credProps: t.Optional(t.Object({rk: t.Optional(t.Boolean())})),
-              hmacCreateSecret: t.Optional(t.Boolean()),
+            cookie: t.Cookie({session: t.String(), auth: t.Optional(t.String())}),
+          },
+        )
+        .get(
+          '/authenticate',
+          async ({query: {username}, cookie: {session}, error}) => {
+            const user = await db.query.usersTable.findFirst({
+              where: eq(usersTable.username, username),
+              with: {passkeys: true},
+            })
+
+            if (!user?.passkeys.length) return error('Not Found', 'User not found')
+
+            const options = await generateAuthenticationOptions({
+              timeout: AUTHENTICATION_TIMEOUT,
+              allowCredentials: user.passkeys.map((passkey) => ({
+                id: passkey.id,
+                type: 'public-key',
+                transports: passkey.transports,
+              })),
+              // Wondering why user verification isn't required? See: https://passkeys.dev/docs/use-cases/bootstrapping/#a-note-about-user-verification
+              userVerification: 'preferred',
+              rpID: process.env.RPID,
+            })
+
+            const sessionId = createId()
+
+            authenticationSessionRepository
+              .save(sessionId, {
+                challenge: options.challenge,
+                userId: user.id,
+              })
+              .then(async (session) => {
+                const entityId = (session as AuthenticationSession & {[EntityId]: string})[EntityId]
+                console.assert(entityId === sessionId)
+                await authenticationSessionRepository.expire(entityId, AUTHENTICATION_TIMEOUT + 60)
+              })
+              .catch(console.error)
+
+            session.set({
+              value: sessionId,
+              sameSite: 'none',
+              secure: true,
+              httpOnly: true,
+              partitioned: true,
+            })
+
+            return options
+          },
+          {
+            query: t.Object({username: t.String({minLength: 0})}),
+            cookie: t.Cookie({session: t.Optional(t.String()), auth: t.Optional(t.String())}),
+          },
+        )
+        .post(
+          '/authenticate',
+          async ({body, cookie: {session, auth}, jwt, error}) => {
+            const {challenge: expectedChallenge, userId} = await authenticationSessionRepository.fetch(session.value)
+
+            removeSecureCookie(session)
+
+            if (!expectedChallenge) return error('Unauthorized', 'Session not found. It maybe expired.') // https://stackoverflow.com/questions/1653493/what-http-status-code-is-supposed-to-be-used-to-tell-the-client-the-session-has
+
+            const user = (await db.query.usersTable.findFirst({
+              where: eq(usersTable.id, userId),
+              with: {passkeys: true},
+            }))!
+
+            const dbCredential = user.passkeys.find(({id}) => id === body.id)
+
+            if (!dbCredential) return error('Bad Request', 'Authenticator is not registered with this site')
+
+            const {verification, err} = await verifyAuthenticationResponse({
+              response: body,
+              expectedChallenge,
+              expectedOrigin: process.env.CORS_ORIGIN,
+              expectedRPID: process.env.RPID,
+              credential: {
+                ...dbCredential,
+                transports: dbCredential.transports,
+              },
+              requireUserVerification: false,
+            })
+              .then((verification) => ({verification, err: undefined}))
+              .catch((err: Error) => ({verification: undefined, err}))
+            if (err) {
+              console.error(err)
+              return error('Bad Request', err.message)
+            }
+
+            const {verified, authenticationInfo} = verification
+
+            if (!verified) return error('Unauthorized', 'Verification failed. Try again.')
+
+            // Update the credential's counter in the DB to the newest count in the authentication
+            db.update(passkeysTable).set({counter: authenticationInfo.newCounter}).catch(console.error)
+
+            auth.set({
+              value: await jwt.sign({id: user.id, username: user.username}),
+              sameSite: 'none',
+              httpOnly: true,
+              secure: true,
+              partitioned: true,
+              maxAge: SESSION_MAX_AGE, // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie#max-agenumber
+              // path: '/dashboard',
+            })
+          },
+          {
+            body: t.Object({
+              id: tBase64URLString,
+              rawId: tBase64URLString,
+              response: t.Object({
+                clientDataJSON: tBase64URLString,
+                authenticatorData: tBase64URLString,
+                signature: tBase64URLString,
+                userHandle: t.Optional(tBase64URLString),
+              }),
+              authenticatorAttachment: tStringEnum(['cross-platform', 'platform'] as const),
+              clientExtensionResults: t.Object({
+                appid: t.Optional(t.Boolean()),
+                credProps: t.Optional(t.Object({rk: t.Optional(t.Boolean())})),
+                hmacCreateSecret: t.Optional(t.Boolean()),
+              }),
+              type: t.Literal<PublicKeyCredentialType>('public-key'),
             }),
-            type: t.Literal<PublicKeyCredentialType>('public-key'),
-          }),
-          cookie: t.Cookie({session: t.String()}),
-        },
-      ),
+            cookie: t.Cookie({session: t.String(), auth: t.Optional(t.String())}),
+          },
+        ),
   )
+
+const app = new Elysia()
+  .use(swagger({path: 'open-api'}))
+  .use(authApp)
   .listen(process.env.PORT ?? 7979)
 
 console.info(`🦊 Elysia is running at ${app.server!.url}`)
 
 const ES256 = -7
 const RS256 = -257
+
+const SESSION_MAX_AGE = 24 * 60 * 60 // 1 day
+
+function removeSecureCookie(cookie: Cookie<unknown>) {
+  cookie.set({
+    sameSite: 'none',
+    secure: true,
+    httpOnly: true,
+    partitioned: true,
+    expires: new Date(0),
+  })
+}
