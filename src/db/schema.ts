@@ -1,16 +1,15 @@
 // noinspection JSUnusedGlobalSymbols
 
 import {init as initCuid} from '@paralleldrive/cuid2'
-import {relations} from 'drizzle-orm'
+import {relations, sql} from 'drizzle-orm'
 import {
   bigint,
   boolean,
   char,
+  check,
   customType,
   index,
-  integer,
   pgTable,
-  serial,
   text,
   timestamp,
   uniqueIndex,
@@ -24,17 +23,21 @@ const bytea = customType<{data: Uint8Array; driverData: Buffer; notNull: false; 
   toDriver: (value) => Buffer.from(value),
 })
 
-export const usersTable = pgTable('user', {
-  id: char({length: 24})
-    .$defaultFn(() => createId())
-    .primaryKey(),
-  username: varchar({length: 127}).notNull().unique(),
-  passwordHash: varchar('password_hash', {}),
-  phone: bigint({mode: 'number'}).notNull().unique(),
-  email: varchar({length: 255}).notNull().unique(),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  lastModified: timestamp('last_modified', {mode: 'date'}).defaultNow().notNull(),
-})
+export const usersTable = pgTable(
+  'user',
+  {
+    id: char({length: 24})
+      .$defaultFn(() => createId())
+      .primaryKey(),
+    username: varchar({length: 127}).unique().notNull(),
+    passwordHash: varchar('password_hash', {}),
+    phone: bigint({mode: 'number'}),
+    email: varchar({length: 255}),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    lastModified: timestamp('last_modified', {mode: 'date'}).defaultNow().notNull(),
+  },
+  (table) => [check('username_min_length', sql`length(${table.username}) >= 5`)],
+)
 
 /** @see https://simplewebauthn.dev/docs/packages/server#additional-data-structures */
 export const passkeysTable = pgTable(
@@ -49,12 +52,7 @@ export const passkeysTable = pgTable(
     backedUp: boolean('backed_up').notNull(),
     transports: varchar({length: 255}), // Store string array as a CSV string // Ex: ['ble', 'cable', 'hybrid', 'internal', 'nfc', 'smart-card', 'usb'].join(',')
   },
-  (table) => [
-    {
-      webauthnUserIdIdx: index().on(table.webauthnUserId),
-      webauthnUserIdAndUserIdIdx: uniqueIndex().on(table.webauthnUserId, table.userId),
-    },
-  ],
+  (table) => [index().on(table.webauthnUserId), uniqueIndex().on(table.webauthnUserId, table.userId)],
 )
 
 export const usersRelations = relations(usersTable, ({many}) => ({passkeys: many(passkeysTable)}))

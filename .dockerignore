@@ -15,6 +15,7 @@
 **/README.md
 
 /postgresql/
+/redis/
 
 **/node_modules/
 

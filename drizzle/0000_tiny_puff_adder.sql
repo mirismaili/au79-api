@@ -13,13 +13,12 @@ CREATE TABLE IF NOT EXISTS "user" (
 	"id" char(24) PRIMARY KEY NOT NULL,
 	"username" varchar(127) NOT NULL,
 	"password_hash" varchar,
-	"phone" bigint NOT NULL,
-	"email" varchar(255) NOT NULL,
+	"phone" bigint,
+	"email" varchar(255),
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"last_modified" timestamp DEFAULT now() NOT NULL,
 	CONSTRAINT "user_username_unique" UNIQUE("username"),
-	CONSTRAINT "user_phone_unique" UNIQUE("phone"),
-	CONSTRAINT "user_email_unique" UNIQUE("email")
+	CONSTRAINT "username_min_length" CHECK (length("user"."username") >= 5)
 );
 --> statement-breakpoint
 DO $$ BEGIN
@@ -27,3 +26,6 @@ DO $$ BEGIN
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "passkey_webauthn_user_id_index" ON "passkey" USING btree ("webauthn_user_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "passkey_webauthn_user_id_user_id_index" ON "passkey" USING btree ("webauthn_user_id","user_id");

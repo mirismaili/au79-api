@@ -5,27 +5,33 @@ import {generateRegistrationOptions, verifyRegistrationResponse} from '@simplewe
 import type {AuthenticatorTransportFuture, Base64URLString} from '@simplewebauthn/types'
 import {eq} from 'drizzle-orm'
 import {drizzle} from 'drizzle-orm/node-postgres'
-import {createInsertSchema} from 'drizzle-typebox'
 import {Elysia, t} from 'elysia'
+import {createClient} from 'redis'
+import {EntityId, Repository, Schema} from 'redis-om'
+
+type RegistrationSession = {challenge: string; userId: string; webauthnUserId: string}
+
+const registrationSessionSchema = new Schema<RegistrationSession>('registrationSession', {
+  challenge: {type: 'string'},
+  userId: {type: 'string'},
+  webauthnUserId: {type: 'string'},
+})
+
+const redisClient = createClient({url: process.env.REDIS_URL!})
+redisClient.on('error', console.error)
+await redisClient.connect()
+
+const registrationSessionRepository = new Repository(registrationSessionSchema, redisClient)
 
 const {passkeysTable, usersTable} = drizzleSchema
-const db = drizzle(Bun.env.DATABASE_URL!, {schema: drizzleSchema})
-
-const insertUserSchema = createInsertSchema(usersTable, {
-  email: t.String({format: 'email'}),
-})
-const usernameSchema = {...t.Index(insertUserSchema, ['username']), minLength: 5}
-
-const tSession = t.Object({
-  challenge: t.String(),
-  username: t.String(),
-  webauthnUserId: t.String(),
-})
+const db = drizzle(process.env.DATABASE_URL!, {schema: drizzleSchema})
 
 /** @see https://github.com/sinclairzx81/typebox#unsafe-types */
 const tStringEnum = <T extends string[]>(values: readonly [...T]) => t.Unsafe<T[number]>({...t.String(), enum: values})
 
 const tBase64URLString = t.Unsafe<Base64URLString>(t.String({contentEncoding: 'base64'}))
+
+const REGISTRATION_TIMEOUT = 60
 
 const app = new Elysia()
   .use(swagger({path: 'open-api'}))
@@ -34,17 +40,22 @@ const app = new Elysia()
     app
       .get(
         '/register',
-        async ({query: {username}, cookie: {session}}) => {
-          const user = await db.query.usersTable.findFirst({
-            where: eq(usersTable.username, username),
-            with: {passkeys: true},
-          })
+        async ({query: {username, phone, email}, cookie: {session}}) => {
+          const [newUser] = await db
+            .insert(usersTable)
+            .values({username, phone: phone ? +phone : undefined, email})
+            .onConflictDoNothing()
+            .returning()
+
+          const user = newUser
+            ? {...newUser, passkeys: []}
+            : (await db.query.usersTable.findFirst({where: eq(usersTable.username, username), with: {passkeys: true}}))!
 
           const options = await generateRegistrationOptions({
             rpName: 'Au79 API',
             rpID: 'localhost',
             userName: username,
-            timeout: 60_000,
+            timeout: REGISTRATION_TIMEOUT * 1000,
             attestationType: 'none',
             /**
              * Passing in a user's list of already-registered credential IDs here prevents users from
@@ -52,63 +63,60 @@ const app = new Elysia()
              * error in the browser if it's asked to perform registration when it recognizes one of the
              * credential ID's.
              */
-            excludeCredentials: user?.passkeys.map((passkey) => ({
+            excludeCredentials: user.passkeys.map((passkey) => ({
               id: passkey.id,
               transports: passkey.transports?.split(',') as AuthenticatorTransportFuture[],
             })),
             authenticatorSelection: {
               residentKey: 'discouraged',
-              /**
-               * Wondering why user verification isn't required? See here:
-               *
-               * https://passkeys.dev/docs/use-cases/bootstrapping/#a-note-about-user-verification
-               */
+              // Wondering why user verification isn't required? See: https://passkeys.dev/docs/use-cases/bootstrapping/#a-note-about-user-verification
               userVerification: 'preferred',
             },
-            /**
-             * Support the two most common algorithms: ES256, and RS256
-             * @see https://chromium.googlesource.com/chromium/src/+/main/content/browser/webauth/pub_key_cred_params.md
-             */
+            // Support the two most common algorithms: ES256, and RS256. See: https://chromium.googlesource.com/chromium/src/+/main/content/browser/webauth/pub_key_cred_params.md
             supportedAlgorithmIDs: [ES256, RS256],
           })
 
-          /**
-           * The server needs to temporarily remember this value for verification, so don't lose it until
-           * after you verify the registration response.
-           */
           session.set({
             sameSite: 'none',
             secure: true,
             httpOnly: true,
             partitioned: true,
-            value: {challenge: options.challenge, username, webauthnUserId: options.user.id},
           })
+          const sessionId = await registrationSessionRepository
+            .save({
+              challenge: options.challenge,
+              userId: user.id,
+              webauthnUserId: options.user.id,
+            })
+            .then(
+              (registrationSession) => (registrationSession as RegistrationSession & {[EntityId]: string})[EntityId],
+            )
+          registrationSessionRepository.expire(sessionId, REGISTRATION_TIMEOUT + 60).catch(console.error)
+          session.value = sessionId
 
           return options
         },
         {
-          query: t.Object({username: {...t.Index(insertUserSchema, ['username']), minLength: 5}}),
-          cookie: t.Cookie(
-            {
-              session: t.Optional(t.Partial(tSession)),
-            },
-            // {
-            //   secrets: 'Fischl von Luftschloss Narfidort', // TODO: process.env.COOKIES_SECRET
-            //   sign: ['session'],
-            // },
-          ),
+          query: t.Object({
+            username: t.String({minLength: 0}),
+            phone: t.Optional(t.String({minLength: 6, pattern: '^\\d*$'})),
+            email: t.Optional(t.String({format: 'email'})),
+          }),
+          cookie: t.Cookie({session: t.Optional(t.String())}),
         },
       )
       .post(
         '/register',
         async ({body, cookie: {session}, error}) => {
-          const sessionValue = session.value
+          const {challenge, userId, webauthnUserId} = await registrationSessionRepository.fetch(session.value)
+
           session.set({sameSite: 'none', secure: true, httpOnly: true, partitioned: true, expires: new Date(0)}) // Remove session
-          const expectedChallenge = sessionValue.challenge
+
+          if (!challenge) return error('Unauthorized', 'Session not found. It maybe expired.') // https://stackoverflow.com/questions/1653493/what-http-status-code-is-supposed-to-be-used-to-tell-the-client-the-session-has
 
           const {verification, err} = await verifyRegistrationResponse({
             response: body,
-            expectedChallenge,
+            expectedChallenge: challenge,
             expectedOrigin: 'http://localhost:7900',
             expectedRPID: 'localhost',
             requireUserVerification: false, // TODO
@@ -125,13 +133,8 @@ const app = new Elysia()
           if (!verified) return error(401, 'Verification failed. Try again.')
 
           if (registrationInfo) {
-            let [user] = await db
-              .insert(usersTable)
-              .values({username: sessionValue.username, email: '', phone: 98})
-              .onConflictDoNothing()
-              .returning()
-            user ??= (await db.query.usersTable.findFirst({
-              where: eq(usersTable.username, sessionValue.username),
+            const user = (await db.query.usersTable.findFirst({
+              where: eq(usersTable.id, userId),
               with: {passkeys: true},
             }))!
 
@@ -143,7 +146,7 @@ const app = new Elysia()
                 ...credential,
                 transports: body.response.transports?.join(','),
                 userId: user.id,
-                webauthnUserId: sessionValue.webauthnUserId,
+                webauthnUserId,
                 backedUp: credentialBackedUp,
                 deviceType: credentialDeviceType,
               })
@@ -174,44 +177,11 @@ const app = new Elysia()
             }),
             type: t.Literal<PublicKeyCredentialType>('public-key'),
           }),
-          cookie: t.Cookie({session: tSession}),
+          cookie: t.Cookie({session: t.String()}),
         },
       ),
   )
-  .listen(Bun.env.PORT ?? 7979)
-
-// const app = new Elysia()
-//   //   {
-//   //   cookie: {
-//   //     secrets: 'Fischl von Luftschloss Narfidort',
-//   //     sign: ['profile'],
-//   //   },
-//   // }
-//   .get(
-//     '/',
-//     ({cookie: {profile}}) => {
-//       profile.value = {
-//         id: 617,
-//         name: 'Summoning 101',
-//       }
-//       return 'A'
-//     },
-//     {
-//       cookie: t.Cookie(
-//         {
-//           profile: t.Object({
-//             id: t.Numeric(),
-//             name: t.String(),
-//           }),
-//         },
-//         {
-//           secrets: 'Fischl von Luftschloss Narfidort',
-//           sign: ['profile'],
-//         },
-//       ),
-//     },
-//   )
-//   .listen(Bun.env.PORT ?? 7979)
+  .listen(process.env.PORT ?? 7979)
 
 console.info(`🦊 Elysia is running at ${app.server!.url}`)
 

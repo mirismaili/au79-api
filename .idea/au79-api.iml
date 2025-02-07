@@ -8,6 +8,7 @@
       <excludeFolder url="file://$MODULE_DIR$/dist" />
       <excludeFolder url="file://$MODULE_DIR$/postgresql" />
       <excludeFolder url="file://$MODULE_DIR$/drizzle" />
+      <excludeFolder url="file://$MODULE_DIR$/redis" />
       <excludePattern pattern="package-lock.json" />
       <excludePattern pattern=".post-commit.log" />
     </content>

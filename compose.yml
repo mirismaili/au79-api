@@ -1,4 +1,20 @@
 services:
+  api:
+    image: au79-api-img
+    build:
+      context: .
+      args:
+        NODE_VERSION: 23.7.0
+        BUN_VERSION: 1.2.2
+        CI: true # Simulate production build
+    depends_on:
+      - db
+      - cache
+    environment:
+      PORT: 7979
+    ports:
+      - 7979:7979
+
   db:
     image: postgres:17.0-bookworm
     ports:
@@ -8,15 +24,12 @@ services:
       - POSTGRES_USER=au79
     volumes:
       - ./postgresql/data:/var/lib/postgresql/data
-  api:
-    image: au79-api-img
-    build:
-      context: .
-      args:
-        NODE_VERSION: 23.7.0
-        BUN_VERSION: 1.2.2
-        CI: true # Simulate production build
-    environment:
-      PORT: 7979
+
+  cache:
+    image: redis/redis-stack:7.4.0-v1
     ports:
-      - 7979:7979
+      - 6379:6379
+    env_file:
+      - .env
+    volumes:
+      - ./redis/data:/data

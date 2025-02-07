@@ -1,5 +1,5 @@
 {
-  "id": "203a6835-1988-4d96-9129-51607908746d",
+  "id": "2b9180f2-e3ff-4a73-8588-26c846c645b4",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -57,18 +57,51 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "passkey_webauthn_user_id_index": {
+          "name": "passkey_webauthn_user_id_index",
+          "columns": [
+            {
+              "expression": "webauthn_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "passkey_webauthn_user_id_user_id_index": {
+          "name": "passkey_webauthn_user_id_user_id_index",
+          "columns": [
+            {
+              "expression": "webauthn_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "passkey_user_id_user_id_fk": {
           "name": "passkey_user_id_user_id_fk",
           "tableFrom": "passkey",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -105,13 +138,13 @@
           "name": "phone",
           "type": "bigint",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "email": {
           "name": "email",
           "type": "varchar(255)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -135,27 +168,16 @@
         "user_username_unique": {
           "name": "user_username_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "username"
-          ]
-        },
-        "user_phone_unique": {
-          "name": "user_phone_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "phone"
-          ]
-        },
-        "user_email_unique": {
-          "name": "user_email_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "email"
-          ]
+          "columns": ["username"]
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "username_min_length": {
+          "name": "username_min_length",
+          "value": "length(\"user\".\"username\") >= 5"
+        }
+      },
       "isRLSEnabled": false
     }
   },
