@@ -13,8 +13,8 @@ services:
     build:
       context: .
       args:
-        BUN_VERSION: 1.1.32
-        NODE_VERSION: 23.0.0
+        NODE_VERSION: 23.7.0
+        BUN_VERSION: 1.2.2
         CI: true # Simulate production build
     environment:
       PORT: 7979

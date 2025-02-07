@@ -6,7 +6,8 @@ on:
 
 env:
   DOCKER_IMAGE: ghcr.io/au79-panel
-  NODE_VERSION: 22.10.0 # Sync this with the specified `NODE_VERSION` in "compose.yml"
+  NODE_VERSION: 23.7.0 # Sync this with the specified `NODE_VERSION` in "compose.yml"
+  BUN_VERSION: 1.2.2 # Sync this with the specified `BUN_VERSION` in "compose.yml"
 
 jobs:
   install-all-dependencies:
@@ -19,7 +20,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22.10.0
+          node-version: ${{env.NODE_VERSION}}
           cache: npm
 
       - name: Install all dependencies
@@ -37,7 +38,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22.10.0
+          node-version: ${{env.NODE_VERSION}}
           cache: npm
 
       - name: Install all dependencies
@@ -58,7 +59,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22.10.0
+          node-version: ${{env.NODE_VERSION}}
           cache: npm
 
       - name: Install all dependencies
@@ -79,7 +80,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22.10.0
+          node-version: ${{env.NODE_VERSION}}
           cache: npm
 
       - name: Install all dependencies
@@ -97,17 +98,6 @@ jobs:
         with:
           fetch-depth: 100
 
-      - name: Calculate Build Version
-        id: calculation
-        run: |
-          echo "Calculating build version..."
-          BUILD_VERSION=$(( \
-            `git rev-list --count HEAD` - \
-            `git rev-list --count v$(grep -Po '"version":\s*"\K[^"]*(?=")' package.json) || echo 0` \
-          ))
-          echo "build_version=$BUILD_VERSION" >> $GITHUB_OUTPUT
-          echo "build_version=$BUILD_VERSION"
-
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -117,7 +107,15 @@ jobs:
 
       - name: Setup Vars
         id: setup_vars
-        run: echo "short_sha=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+        run: |
+          echo "Calculating build version..."
+          BUILD_VERSION=$(( \
+            `git rev-list --count HEAD` - \
+            `git rev-list --count v$(grep -Po '"version":\s*"\K[^"]*(?=")' package.json) || echo 0` \
+          ))
+          echo "build_version=$BUILD_VERSION"
+          echo "build_version=$BUILD_VERSION" >> $GITHUB_OUTPUT
+          echo "short_sha=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
 
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v4
@@ -125,8 +123,9 @@ jobs:
           context: .
           push: true
           build-args: |
-            NODE_VERSION=${{env.NODE_VERSION}}
-            BUILD_VERSION=${{steps.calculation.outputs.build_version}} >> $GITHUB_ENV
+            NODE_VERSION
+            BUN_VERSION
+            BUILD_VERSION=${{steps.setup_vars.outputs.build_version}}
           target: server
           tags: ghcr.io/${{github.repository}}:${{github.ref_name}}-${{steps.setup_vars.outputs.short_sha}}
 
