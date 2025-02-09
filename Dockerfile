@@ -15,10 +15,10 @@ COPY --from=node /usr/local/bin /usr/local/bin
 
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN time npm ci --ignore-scripts
+RUN npm ci --ignore-scripts
 
 FROM install-all-deps AS install-prod-deps
-RUN time npm ci --ignore-scripts --omit=dev
+RUN npm ci --ignore-scripts --omit=dev
 
 FROM base AS builder-and-server-base
 WORKDIR /app
@@ -30,7 +30,7 @@ FROM builder-and-server-base AS builder
 COPY --from=install-all-deps /app/node_modules ./node_modules
 COPY . ./
 
-RUN time bun run build \
+RUN bun run build \
     && find . ! -name dist -mindepth 1 -maxdepth 1 -exec rm -rf {} + # Remove everything except "dist" folder
 
 FROM builder-and-server-base AS server
@@ -46,3 +46,9 @@ USER elysia
 
 EXPOSE 7979
 CMD ["bun", "start"]
+
+FROM install-all-deps AS db-migrator
+WORKDIR /app
+COPY drizzle drizzle
+COPY drizzle.config.ts ./
+CMD ["npm", "run", "migrate-db"]

@@ -1,6 +1,6 @@
 services:
   api:
-    image: au79-api-img
+    image: au79-api
     build:
       context: .
       args:
@@ -16,14 +16,14 @@ services:
       - 7979:7979
 
   db:
-    image: postgres:17.0-bookworm
+    image: postgres:17.2-bookworm
     ports:
       - 5432:5432
     environment:
       - POSTGRES_HOST_AUTH_METHOD=trust
       - POSTGRES_USER=au79
     volumes:
-      - ./postgresql/data:/var/lib/postgresql/data
+      - pg_data:/var/lib/postgresql/data
 
   cache:
     image: redis/redis-stack:7.4.0-v1
@@ -33,3 +33,6 @@ services:
       - .env
     volumes:
       - ./redis/data:/data
+
+volumes:
+  pg_data:

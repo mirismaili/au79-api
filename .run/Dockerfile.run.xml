@@ -6,12 +6,12 @@
         <option name="buildArgs">
           <list>
             <DockerEnvVarImpl>
-              <option name="name" value="BUN_VERSION" />
-              <option name="value" value="1.1.31" />
+              <option name="name" value="NODE_VERSION" />
+              <option name="value" value="23.7.0" />
             </DockerEnvVarImpl>
             <DockerEnvVarImpl>
-              <option name="name" value="NODE_VERSION" />
-              <option name="value" value="23.0.0" />
+              <option name="name" value="BUN_VERSION" />
+              <option name="value" value="1.2.2" />
             </DockerEnvVarImpl>
           </list>
         </option>

@@ -129,6 +129,18 @@ jobs:
           target: server
           tags: ghcr.io/${{github.repository}}:${{github.ref_name}}-${{steps.setup_vars.outputs.short_sha}}
 
+      - name: Build and Push DB Migrator Docker Image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          build-args: |
+            NODE_VERSION
+            BUN_VERSION
+            BUILD_VERSION=${{steps.setup_vars.outputs.build_version}}
+          target: db-migrator
+          tags: ghcr.io/${{github.repository}}-db-migrator:${{github.ref_name}}-${{steps.setup_vars.outputs.short_sha}}
+
   deploy-production:
     name: Deploy to Production
     runs-on: ubuntu-latest
