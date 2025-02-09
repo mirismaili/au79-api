@@ -139,7 +139,7 @@ jobs:
             BUN_VERSION
             BUILD_VERSION=${{steps.setup_vars.outputs.build_version}}
           target: db-migrator
-          tags: ghcr.io/${{github.repository}}-db-migrator:${{github.ref_name}}-${{steps.setup_vars.outputs.short_sha}}
+          tags: ghcr.io/${{github.repository}}/db-migrator:${{github.ref_name}}-${{steps.setup_vars.outputs.short_sha}}
 
   deploy-production:
     name: Deploy to Production
